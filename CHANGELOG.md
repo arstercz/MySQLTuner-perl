@@ -20,3 +20,4 @@
 15. adjust the calc rule of the innodb buffer pool size and instances number;
 16. adjust innodb log file size method;
 17. disable the cve check and mariadb galera check;
+18. check sync_binlog when host is vm or physical;

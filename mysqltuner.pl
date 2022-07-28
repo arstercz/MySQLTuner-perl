@@ -1134,11 +1134,6 @@ sub remove_empty {
     grep { $_ ne '' } @_;
 }
 
-sub grep_file_contents {
-    my $file = shift;
-    my $patt;
-}
-
 sub get_file_contents {
     my $file = shift;
     open( my $fh, "<", $file ) or die "Can't open $file for read: $!";
@@ -1978,6 +1973,24 @@ sub get_replication_status {
         if ( $myvar{'binlog_row_image'} ne 'MINIMAL' ) {
           badprint "Binlog row image is not MINIMAL";
         }
+    }
+    if (is_virtual_machine) {
+        if ( $myvar{sync_binlog} != 1 ) {
+	    goodprint "MySQL is running on vm, and sync_binlog is not 1.";
+	}
+	else {
+	    badprint "MySQL is running on vm, but sync_binlog is 1.";
+            push( @adjvars, "sync_binlog (> 1, eg: 100)" );
+	}
+    }
+    else {
+        if ( $myvar{sync_binlog} != 1 ) {
+	    badprint "MySQL is running on physical, but sync_binlog is not 1.";
+            push( @adjvars, "sync_binlog (= 1)" );
+	}
+	else {
+	    goodprint "MySQL is running on physical, and sync_binlog is 1.";
+	}
     }
     infoprint "XA support enabled: " . $myvar{'innodb_support_xa'};
 
