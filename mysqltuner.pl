@@ -601,7 +601,8 @@ sub mysql_setup {
 # If we're doing a remote connection, but forcemem wasn't specified, we need to exit
         if (   $opt{'forcemem'} eq 0
             && ( $opt{host} ne "127.0.0.1" )
-            && ( $opt{host} ne "localhost" ) )
+            && ( $opt{host} ne "localhost" ) 
+            && ( ! ip_in_local($opt{host}) ) )
         {
             badprint "The --forcemem option is required for remote connections";
             exit 1;
@@ -857,6 +858,33 @@ sub select_array {
     debugprint "select_array: return code : $?";
     chomp(@result);
     return @result;
+}
+
+sub ip_in_local {
+    my $ip  = shift;
+    my @ips = get_local_ips();
+
+    return 0 unless defined $ips[0];
+
+    foreach my $k (@ips) {
+      return 1 if $k eq $ip;
+    }
+    return 0;
+}
+
+sub get_local_ips {
+    my $res = `/sbin/ip addr`;
+    if ( $? != 0 ) {
+        badprint "Failed to execute: /sbin/ip addr";
+  	return undef;
+    }
+    my @ips =
+      ($res =~ /\s+inet\s+?
+                (\d+?\.\d+?\.\d+?\.\d+)\/\d+\s+?
+                (?:brd|scope)
+              /xsg);
+
+    return @ips;
 }
 
 sub human_size {

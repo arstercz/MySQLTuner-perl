@@ -21,3 +21,4 @@
 16. adjust innodb log file size method;
 17. disable the cve check and mariadb galera check;
 18. check sync_binlog when host is vm or physical;
+19. check host ip whether in locals or not;
