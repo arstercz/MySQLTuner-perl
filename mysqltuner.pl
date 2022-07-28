@@ -5,6 +5,7 @@
 # Copyright (C) 2015-2022 Jean-Marie Renouard - jmrenouard@gmail.com
 
 # For the latest updates, please visit http://mysqltuner.pl/
+# fork from https://github.com/major/MySQLTuner-perl
 # Git repository available at https://github.com/major/MySQLTuner-perl
 #
 # This program is free software: you can redistribute it and/or modify
@@ -36,7 +37,7 @@
 #
 # Inspired by Matthew Montgomery's tuning-primer.sh script:
 # http://www.day32.com/MySQL/
-#
+
 package main;
 
 use 5.005;
@@ -50,14 +51,8 @@ use Pod::Usage;
 use File::Basename;
 use Cwd 'abs_path';
 
-#use Data::Dumper;
-#$Data::Dumper::Pair = " : ";
-
-# for which()
-#use Env;
-
 # Set up a few variables for use in the script
-my $tunerversion = "2.0.4";
+my $tunerversion = "2.0.5";
 my ( @adjvars, @generalrec );
 
 # Set defaults
@@ -79,8 +74,6 @@ my %opt = (
     "password"       => 0,
     "ssl-ca"         => 0,
     "skipsize"       => 0,
-    "checkversion"   => 0,
-    "updateversion"  => 0,
     "buffers"        => 0,
     "passwordfile"   => 0,
     "bannedports"    => '',
@@ -120,7 +113,7 @@ GetOptions(
     'host=s',          'socket=s',
     'port=i',          'user=s',
     'pass=s',          'skipsize',
-    'checkversion',    'mysqladmin=s',
+    'mysqladmin=s',    'maxportallowed=s',
     'mysqlcmd=s',      'help',
     'buffers',         'skippassword',
     'passwordfile=s',  'outputfile=s',
@@ -128,7 +121,6 @@ GetOptions(
     'json',            'prettyjson',
     'template=s',      'reportfile=s',
     'cvefile=s',       'bannedports=s',
-    'updateversion',   'maxportallowed=s',
     'verbose',         'password=s',
     'passenv=s',       'userenv=s',
     'defaults-file=s', 'ssl-ca=s',
@@ -190,7 +182,6 @@ $basic_password_files = "/usr/share/mysqltuner/basic_passwords.txt"
 
 # check if we need to enable verbose mode
 if ( $opt{verbose} ) {
-    $opt{checkversion} = 1;    # Check for updates to MySQLTuner
     $opt{dbstat}       = 1;    # Print database information
     $opt{tbstat}       = 1;    # Print database information
     $opt{idxstat}      = 1;    # Print index information
@@ -305,7 +296,7 @@ sub infoprinthcmd {
 sub cpu_cores {
     if ( $^O eq 'linux' ) {
         my $cntCPU =
-`awk -F: '/^core id/ && !P[\$2] { CORES++; P[\$2]=1 }; /^physical id/ && !N[\$2] { CPUs++; N[\$2]=1 };  END { print CPUs*CORES }' /proc/cpuinfo`;
+`awk -F: '/^processor/ { CPUs++ };  END { print CPUs }' /proc/cpuinfo`;
         chomp $cntCPU;
         return ( $cntCPU == 0 ? `nproc` : $cntCPU );
     }
@@ -449,7 +440,7 @@ sub os_setup {
         }
         else {
             $swap_memory = 0;
-            badprint "Assuming 0 MB of swap space (use --forceswap to specify)";
+            infoprint "Assuming 0 MB of swap space (use --forceswap to specify)";
         }
     }
     else {
@@ -524,154 +515,6 @@ sub os_setup {
     $result{'OS'}{'Other Processes'}{'bytes'}  = get_other_process_memory();
     $result{'OS'}{'Other Processes'}{'pretty'} =
       hr_bytes( get_other_process_memory() );
-}
-
-sub get_http_cli {
-    my $httpcli = which( "curl", $ENV{'PATH'} );
-    chomp($httpcli);
-    if ($httpcli) {
-        return $httpcli;
-    }
-
-    $httpcli = which( "wget", $ENV{'PATH'} );
-    chomp($httpcli);
-    if ($httpcli) {
-        return $httpcli;
-    }
-    return "";
-}
-
-# Checks for updates to MySQLTuner
-sub validate_tuner_version {
-    if ( $opt{'checkversion'} eq 0 ) {
-        print "\n" unless ( $opt{'silent'} or $opt{'json'} );
-        infoprint "Skipped version check for MySQLTuner script";
-        return;
-    }
-
-    my $update;
-    my $url =
-"https://raw.githubusercontent.com/major/MySQLTuner-perl/master/mysqltuner.pl";
-    my $httpcli = get_http_cli();
-    if ( $httpcli =~ /curl$/ ) {
-        debugprint "$httpcli is available.";
-
-        debugprint
-"$httpcli -m 3 -silent '$url' 2>/dev/null | grep 'my \$tunerversion'| cut -d\\\" -f2";
-        $update =
-`$httpcli -m 3 -silent '$url' 2>/dev/null | grep 'my \$tunerversion'| cut -d\\\" -f2`;
-        chomp($update);
-        debugprint "VERSION: $update";
-
-        compare_tuner_version($update);
-        return;
-    }
-
-    if ( $httpcli =~ /wget$/ ) {
-        debugprint "$httpcli is available.";
-
-        debugprint
-"$httpcli -e timestamping=off -t 1 -T 3 -O - '$url' 2>$devnull| grep 'my \$tunerversion'| cut -d\\\" -f2";
-        $update =
-`$httpcli -e timestamping=off -t 1 -T 3 -O - '$url' 2>$devnull| grep 'my \$tunerversion'| cut -d\\\" -f2`;
-        chomp($update);
-        compare_tuner_version($update);
-        return;
-    }
-    debugprint "curl and wget are not available.";
-    infoprint "Unable to check for the latest MySQLTuner version";
-    infoprint
-"Using --pass and --password option is insecure during MySQLTuner execution(Password disclosure)"
-      if ( defined( $opt{'pass'} ) );
-}
-
-# Checks for updates to MySQLTuner
-sub update_tuner_version {
-    if ( $opt{'updateversion'} eq 0 ) {
-        badprint "Skipped version update for MySQLTuner script";
-        print "\n" unless ( $opt{'silent'} or $opt{'json'} );
-        return;
-    }
-
-    my $update;
-    my $fullpath = "";
-    my $url = "https://raw.githubusercontent.com/major/MySQLTuner-perl/master/";
-    my @scripts =
-      ( "mysqltuner.pl", "basic_passwords.txt", "vulnerabilities.csv" );
-    my $totalScripts    = scalar(@scripts);
-    my $receivedScripts = 0;
-    my $httpcli         = get_http_cli();
-
-    foreach my $script (@scripts) {
-
-        if ( $httpcli =~ /curl$/ ) {
-            debugprint "$httpcli is available.";
-
-            $fullpath = dirname(__FILE__) . "/" . $script;
-            debugprint "FullPath: $fullpath";
-            debugprint
-"$httpcli --connect-timeout 3 '$url$script' 2>$devnull > $fullpath";
-            $update =
-`$httpcli --connect-timeout 3 '$url$script' 2>$devnull > $fullpath`;
-            chomp($update);
-            debugprint "$script updated: $update";
-
-            if ( -s $script eq 0 ) {
-                badprint "Couldn't update $script";
-            }
-            else {
-                ++$receivedScripts;
-                debugprint "$script updated: $update";
-            }
-        }
-        elsif ( $httpcli =~ /wget$/ ) {
-
-            debugprint "$httpcli is available.";
-
-            debugprint
-"$httpcli -qe timestamping=off -t 1 -T 3 -O $script '$url$script'";
-            $update =
-`$httpcli -qe timestamping=off -t 1 -T 3 -O $script '$url$script'`;
-            chomp($update);
-
-            if ( -s $script eq 0 ) {
-                badprint "Couldn't update $script";
-            }
-            else {
-                ++$receivedScripts;
-                debugprint "$script updated: $update";
-            }
-        }
-        else {
-            debugprint "curl and wget are not available.";
-            infoprint "Unable to check for the latest MySQLTuner version";
-        }
-
-    }
-
-    if ( $receivedScripts eq $totalScripts ) {
-        goodprint "Successfully updated MySQLTuner script";
-    }
-    else {
-        badprint "Couldn't update MySQLTuner script";
-    }
-    infoprint "Stopping program: MySQLTuner script must be updated first.";
-    exit 0;
-}
-
-sub compare_tuner_version {
-    my $remoteversion = shift;
-    debugprint "Remote data: $remoteversion";
-
-    #exit 0;
-    if ( $remoteversion ne $tunerversion ) {
-        badprint
-          "There is a new version of MySQLTuner available ($remoteversion)";
-        update_tuner_version();
-        return;
-    }
-    goodprint "You have the latest version of MySQLTuner ($tunerversion)";
-    return;
 }
 
 # Checks to see if a MySQL login is possible
@@ -1194,8 +1037,8 @@ sub get_all_vars {
         $myvar{'innodb_support_xa'} = 'ON';
     }
     $mystat{'Uptime'} = 1
-      unless defined( $mystat{'Uptime'} )
-      and $mystat{'Uptime'} > 0;
+      unless (defined( $mystat{'Uptime'} )
+      and $mystat{'Uptime'} > 0);
     $myvar{'have_galera'} = "NO";
     if (   defined( $myvar{'wsrep_provider_options'} )
         && $myvar{'wsrep_provider_options'} ne ""
@@ -1313,6 +1156,7 @@ sub get_log_file_real_path {
     my $file     = shift;
     my $hostname = shift;
     my $datadir  = shift;
+
     if ( -f "$file" ) {
         return $file;
     }
@@ -1330,6 +1174,10 @@ sub get_log_file_real_path {
     }
     elsif ( -f "$datadir" . "mysql_error.log" ) {
         return "$datadir" . "mysql_error.log";
+    }
+    elsif ( -f "$datadir" . "$file") {
+        $file =~ s#^./## if $file =~ m#^./#;
+        return "$datadir" . "$file";
     }
     elsif ( -f "/var/log/mysql.log" ) {
         return "/var/log/mysql.log";
@@ -1799,22 +1647,7 @@ sub get_system_info {
     infocmd_tab "ifconfig| grep -A1 mtu";
     infoprint "Internal IP           : " . infocmd_one "hostname -I";
     $result{'Network'}{'Internal Ip'} = `ifconfig| grep -A1 mtu`;
-    my $httpcli = get_http_cli();
-    infoprint "HTTP client found: $httpcli" if defined $httpcli;
 
-    my $ext_ip = "";
-    if ( $httpcli =~ /curl$/ ) {
-        $ext_ip = infocmd_one "$httpcli -m 3 ipecho.net/plain";
-    }
-    elsif ( $httpcli =~ /wget$/ ) {
-
-        $ext_ip = infocmd_one "$httpcli -t 1 -T 3 -q -O - ipecho.net/plain";
-    }
-    infoprint "External IP           : " . $ext_ip;
-    $result{'Network'}{'External Ip'} = $ext_ip;
-    badprint
-      "External IP           : Can't check because of Internet connectivity"
-      unless defined($httpcli);
     infoprint "Name Servers          : "
       . infocmd_one "grep 'nameserver' /etc/resolv.conf \| awk '{print \$2}'";
     infoprint "Logged In users       : ";
@@ -2066,7 +1899,7 @@ q{SELECT CONCAT(QUOTE(user), '@', QUOTE(host)) FROM mysql.global_priv WHERE
     }
 
     unless ( -f $basic_password_files ) {
-        badprint "There is no basic password file list!";
+        #badprint "There is no basic password file list!";
         return;
     }
 
@@ -2134,8 +1967,18 @@ sub get_replication_status {
         infoprint "This server is acting as master for "
           . scalar( keys %myslaves )
           . " server(s).";
+	if ( $myvar{'read_only'} eq 'ON' ) {
+           badprint "This server is acting as master, but read_only is ON";
+	   push( @adjvars, "disable the read_only, set global read_only = 0" );
+	}
     }
     infoprint "Binlog format: " . $myvar{'binlog_format'};
+    if ($myvar{'binlog_format'} eq 'ROW') {
+        # meet ourself rule
+        if ( $myvar{'binlog_row_image'} ne 'MINIMAL' ) {
+          badprint "Binlog row image is not MINIMAL";
+        }
+    }
     infoprint "XA support enabled: " . $myvar{'innodb_support_xa'};
 
     infoprint "Semi synchronous replication Master: "
@@ -2160,6 +2003,10 @@ sub get_replication_status {
       );
     if ( scalar( keys %myrepl ) == 0 and scalar( keys %myslaves ) == 0 ) {
         infoprint "This is a standalone server";
+	if ( $myvar{'read_only'} eq 'ON' ) {
+           badprint "This server is standalone server, but read_only is ON";
+	   push( @adjvars, "disable the read_only, set global read_only = 0" );
+	}
         return;
     }
     if ( scalar( keys %myrepl ) == 0 ) {
@@ -2226,8 +2073,8 @@ sub validate_mysql_version {
         or mysql_version_eq( 10, 7 )
         or mysql_version_eq( 10, 8 ) )
     {
-        goodprint "Currently running supported MySQL version "
-          . $myvar{'version'} . "";
+        goodprint "Currently running supported MySQL version: "
+          . $myvar{'version'} . " , server id: " . $myvar{server_id};
         return;
     }
     else {
@@ -2468,6 +2315,7 @@ sub check_storage_engines {
             if (   $db eq "information_schema"
                 or $db eq "performance_schema"
                 or $db eq "mysql"
+                or $db eq "sys"
                 or $db eq "lost+found" )
             {
                 next;
@@ -2506,10 +2354,19 @@ sub check_storage_engines {
         }
     }
     while ( my ( $engine, $size ) = each(%enginestats) ) {
-        infoprint "Data in $engine tables: "
-          . hr_bytes($size)
-          . " (Tables: "
-          . $enginecount{$engine} . ")" . "";
+        if ($engine eq 'InnoDB') {
+          infoprint "Data in $engine tables: "
+            . hr_bytes($size)
+            . " (Tables: "
+            . $enginecount{$engine} . ")" . "";
+        }
+        else {
+          $myvar{lc($engine) . "_nums"} = $enginecount{$engine};
+          badprint "Data in $engine tables: "
+            . hr_bytes($size)
+            . " (Tables: "
+            . $enginecount{$engine} . ")" . "";
+        }
     }
 
     # If the storage engine isn't being used, recommend it to be disabled
@@ -2620,6 +2477,10 @@ sub calculations {
 
     # Per-thread memory
     if ( mysql_version_ge(4) ) {
+        # reset to 32M if max allowed greater than 256M
+        if ($myvar{'max_allowed_packet'} > 268435456) {
+          $myvar{'max_allowed_packet'} = 33554432 
+	}
         $mycalc{'per_thread_buffers'} =
           $myvar{'read_buffer_size'} +
           $myvar{'read_rnd_buffer_size'} +
@@ -2638,6 +2499,10 @@ sub calculations {
     }
     $mycalc{'total_per_thread_buffers'} =
       $mycalc{'per_thread_buffers'} * $myvar{'max_connections'};
+      # assume that running thread eat 20%
+    if ($myvar{'max_connections'} >= 1000) {
+      $mycalc{'total_per_thread_buffers'} *= 0.2
+    }
     $mycalc{'max_total_per_thread_buffers'} =
       $mycalc{'per_thread_buffers'} * $mystat{'Max_used_connections'};
 
@@ -3118,7 +2983,7 @@ sub mysql_stats {
     if ( $mycalc{'pct_max_physical_memory'} > 85 ) {
         badprint "Maximum possible memory usage: "
           . hr_bytes( $mycalc{'max_peak_memory'} )
-          . " ($mycalc{'pct_max_physical_memory'}% of installed RAM)";
+          . " ($mycalc{'pct_max_physical_memory'}% of installed RAM, assume each connect eat 32MB)";
         push( @generalrec,
             "Reduce your overall MySQL memory footprint for system stability" );
     }
@@ -3132,7 +2997,7 @@ sub mysql_stats {
         ( $mycalc{'max_peak_memory'} + get_other_process_memory() ) )
     {
         badprint
-          "Overall possible memory usage with other process exceeded memory";
+          "Overall possible memory usage with other process exceeded memory, assume each connect eat 32MB";
         push( @generalrec,
             "Dedicate this server to your database for highest performance." );
     }
@@ -3157,6 +3022,7 @@ sub mysql_stats {
     }
     if ( defined( $myvar{'log_slow_queries'} ) ) {
         if ( $myvar{'log_slow_queries'} eq "OFF" ) {
+	    badprint "slow query log was disabled";
             push( @generalrec,
                 "Enable the slow query log to troubleshoot bad queries" );
         }
@@ -3329,8 +3195,9 @@ sub mysql_stats {
 
     # Joins
     if ( $mycalc{'joins_without_indexes_per_day'} > 250 ) {
+        my $days = int($mystat{'Uptime'} / 86400);
         badprint
-          "Joins performed without indexes: $mycalc{'joins_without_indexes'}";
+          "Joins performed without indexes: $mycalc{'joins_without_indexes'} in $days days";
         push( @adjvars,
                 "join_buffer_size (> "
               . hr_bytes( $myvar{'join_buffer_size'} )
@@ -3540,7 +3407,7 @@ sub mysql_stats {
                     "table_definition_cache ("
                   . $myvar{'table_definition_cache'} . ") > "
                   . $nbtables
-                  . " or -1 (autosizing if supported)" );
+                  . " or -1 (autosizing if supported), you can increase table_definition_cache, and the default value is min(400 + table_open_cache/2, 2000)." );
         }
         else {
             goodprint "table_definition_cache ("
@@ -3654,14 +3521,15 @@ sub mysql_myisam {
 
     # Key buffer usage
     if ( $mycalc{'pct_key_buffer_used'} > 0 ) {
-        if ( $mycalc{'pct_key_buffer_used'} < 90 ) {
+        $myvar{myisam_nums} ||= 0;
+        if ( $myvar{myisam_nums} > 0 && $mycalc{'pct_key_buffer_used'} < 90 ) {
             badprint "Key buffer used: $mycalc{'pct_key_buffer_used'}% ("
               . hr_bytes( $myvar{'key_buffer_size'} -
                   $mystat{'Key_blocks_unused'} *
                   $myvar{'key_cache_block_size'} )
               . " used / "
               . hr_bytes( $myvar{'key_buffer_size'} )
-              . " cache)";
+              . " cache), myisam table number: $myvar{myisam_nums}";
 
             push(
                 @adjvars,
@@ -3717,13 +3585,13 @@ sub mysql_myisam {
               . hr_bytes( $mycalc{'total_myisam_indexes'} ) . "";
         }
         if ( $mystat{'Key_read_requests'} > 0 ) {
-            if ( $mycalc{'pct_keys_from_mem'} < 95 ) {
+            if ( $myvar{myisam_nums} > 0 && $mycalc{'pct_keys_from_mem'} < 95 ) {
                 badprint
                   "Read Key buffer hit rate: $mycalc{'pct_keys_from_mem'}% ("
                   . hr_num( $mystat{'Key_read_requests'} )
                   . " cached / "
                   . hr_num( $mystat{'Key_reads'} )
-                  . " reads)";
+                  . " reads), myisam table number: $myvar{myisam_nums}";
             }
             else {
                 goodprint
@@ -3791,22 +3659,22 @@ sub mariadb_threadpool {
     {
         my $np = cpu_cores;
         if (    $myvar{'thread_pool_size'} >= $np
-            and $myvar{'thread_pool_size'} < ( $np * 1.5 ) )
+            and $myvar{'thread_pool_size'} < ( $np * 3 ) )
         {
             goodprint
-"thread_pool_size for Percona between 1 and 1.5 times number of CPUs ("
+"thread_pool_size for Percona between 1 and 3 times number of CPUs ("
               . $np . " and "
-              . ( $np * 1.5 ) . ")";
+              . ( $np * 3 ) . ")";
         }
         else {
             badprint
-"thread_pool_size for Percona between 1 and 1.5 times number of CPUs ("
+"thread_pool_size for Percona between 1 and 3 times number of CPUs ("
               . $np . " and "
-              . ( $np * 1.5 ) . ")";
+              . ( $np * 3 ) . ")";
             push( @adjvars,
                     "thread_pool_size between "
                   . $np . " and "
-                  . ( $np * 1.5 )
+                  . ( $np * 3 )
                   . " for InnoDB usage" );
         }
         return;
@@ -5682,6 +5550,11 @@ having sum(if(c.column_key in ('PRI','UNI'), 1,0)) = 0"
     if ( $myvar{'binlog_format'} ne 'ROW' ) {
         badprint "Binlog format should be in ROW mode.";
         push @adjvars, "binlog_format = ROW";
+
+        # meet ourself rule
+        if ( $myvar{'binlog_row_image'} ne 'MINIMAL' ) {
+          badprint "Binlog row image is not MINIMAL";
+        }
     }
     else {
         goodprint "Binlog format is in ROW mode.";
@@ -5949,7 +5822,10 @@ sub mysql_innodb {
     }
 
     # InnoDB Buffer Pool Size
-    if ( $myvar{'innodb_buffer_pool_size'} > $enginestats{'InnoDB'} ) {
+    if ( 
+            ($myvar{'innodb_buffer_pool_size'} > $enginestats{'InnoDB'})
+         || ($myvar{'innodb_buffer_pool_size'} > 3*1024*1024*1024 && $myvar{'innodb_buffer_pool_size'} > ($enginestats{'InnoDB'} / 2))
+       ) {
         goodprint "InnoDB buffer pool / data size: "
           . hr_bytes( $myvar{'innodb_buffer_pool_size'} ) . " / "
           . hr_bytes( $enginestats{'InnoDB'} ) . "";
@@ -5963,39 +5839,39 @@ sub mysql_innodb {
               . hr_bytes( $enginestats{'InnoDB'} )
               . ") if possible." );
     }
-    if (   $mycalc{'innodb_log_size_pct'} < 20
-        or $mycalc{'innodb_log_size_pct'} > 30 )
-    {
+
+    if ( $myvar{'have_innodb'} eq "YES" ) {
+      my $inno_logsize = ( $myvar{'innodb_log_file_size'} * $myvar{'innodb_log_files_in_group'} );
+      if ($inno_logsize < 1 * 1024 * 1024 * 1024 and $myvar{'innodb_buffer_pool_size'} > 1 * 1024 * 1024 * 1024) {
         badprint "Ratio InnoDB log file size / InnoDB Buffer pool size ("
           . $mycalc{'innodb_log_size_pct'} . "%): "
           . hr_bytes( $myvar{'innodb_log_file_size'} ) . " * "
           . $myvar{'innodb_log_files_in_group'} . " / "
           . hr_bytes( $myvar{'innodb_buffer_pool_size'} )
-          . " should be equal to 25%";
+          . " too small.";
         push(
             @adjvars,
             "innodb_log_file_size should be (="
               . hr_bytes_rnd(
-                $myvar{'innodb_buffer_pool_size'} /
-                  $myvar{'innodb_log_files_in_group'} / 4
+                2 * 1024 * 1024 * 1024 /
+                  $myvar{'innodb_log_files_in_group'}
               )
-              . ") if possible, so InnoDB total log files size equals 25% of buffer pool size."
+              . ") if possible, so InnoDB total log files size >= 2G"
         );
         if ( mysql_version_le( 5, 6, 2 ) ) {
             push( @generalrec,
-"For MySQL 5.6.2 and lower, total innodb_log_file_size should have a ceiling of (4096MB / log files in group) - 1MB."
+"For MySQL 5.6.2 and lower, total innodb_log_file_size should have a ceiling of (2048MB / log files in group) - 1MB."
             );
         }
         push( @generalrec,
 "Before changing innodb_log_file_size and/or innodb_log_files_in_group read this: https://bit.ly/2TcGgtU"
         );
-    }
-    else {
-        goodprint "Ratio InnoDB log file size / InnoDB Buffer pool size: "
+      }
+      else {
+        goodprint "Ratio OK for InnoDB log file size / InnoDB Buffer pool size: "
           . hr_bytes( $myvar{'innodb_log_file_size'} ) . " * "
-          . $myvar{'innodb_log_files_in_group'} . "/"
-          . hr_bytes( $myvar{'innodb_buffer_pool_size'} )
-          . " should be equal to 25%";
+          . $myvar{'innodb_log_files_in_group'};
+      }
     }
 
     # InnoDB Buffer Pool Instances (MySQL 5.6.6+)
@@ -6016,25 +5892,26 @@ sub mysql_innodb {
 # InnoDB Buffer Pool Size / 1Go = InnoDB Buffer Pool Instances limited to 64 max.
 
             #  InnoDB Buffer Pool Size > 64Go
-            my $max_innodb_buffer_pool_instances =
+            my $innodb_buffer_pool_g =
               int( $myvar{'innodb_buffer_pool_size'} / ( 1024 * 1024 * 1024 ) );
-            $max_innodb_buffer_pool_instances = 64
-              if ( $max_innodb_buffer_pool_instances > 64 );
 
-            if ( $myvar{'innodb_buffer_pool_instances'} !=
-                $max_innodb_buffer_pool_instances )
-            {
+	    if (
+	           ($innodb_buffer_pool_g <= 64 && $myvar{'innodb_buffer_pool_size'} >= 8)
+		|| ($innodb_buffer_pool_g > 64 && $innodb_buffer_pool_g <= 128 && $myvar{'innodb_buffer_pool_size'} >= 16)
+		|| ($innodb_buffer_pool_g > 128 && $myvar{'innodb_buffer_pool_size'} >= 32)
+	       )
+	    {
+                goodprint "InnoDB buffer pool instances: "
+                  . $myvar{'innodb_buffer_pool_instances'} . "";
+	    }
+	    else {
                 badprint "InnoDB buffer pool instances: "
                   . $myvar{'innodb_buffer_pool_instances'} . "";
                 push( @adjvars,
                         "innodb_buffer_pool_instances(="
-                      . $max_innodb_buffer_pool_instances
+                      . " >=8(innodb_buffer_pool <=64), >=16(innodb_buffer_pool <= 128), >=32(innodb_buffer_pool > 128)"
                       . ")" );
-            }
-            else {
-                goodprint "InnoDB buffer pool instances: "
-                  . $myvar{'innodb_buffer_pool_instances'} . "";
-            }
+	    }
 
             # InnoDB Buffer Pool Size < 1Go
         }
@@ -6110,7 +5987,7 @@ sub mysql_innodb {
     if ( defined $mycalc{'pct_write_efficiency'}
         && $mycalc{'pct_write_efficiency'} < 90 )
     {
-        badprint "InnoDB Write Log efficiency: "
+        infoprint "InnoDB Write Log efficiency: "
           . abs( $mycalc{'pct_write_efficiency'} ) . "% ("
           . abs( $mystat{'Innodb_log_write_requests'} -
               $mystat{'Innodb_log_writes'} )
@@ -6713,9 +6590,6 @@ sub close_outputfile {
 
 sub headerprint {
     prettyprint " >>  MySQLTuner $tunerversion\n"
-      . "\t * Jean-Marie Renouard <jmrenouard\@gmail.com>\n"
-      . "\t * Major Hayden <major\@mhtx.net>\n"
-      . " >>  Bug reports, feature requests, and downloads at http://mysqltuner.pl/\n"
       . " >>  Run with '--help' for additional options and output filtering";
 }
 
@@ -6847,7 +6721,6 @@ sub which {
 # ---------------------------------------------------------------------------
 headerprint;    # Header Print
 
-validate_tuner_version;    # Check last version
 mysql_setup;               # Gotta login first
 debugprint "MySQL FINAL Client : $mysqlcmd $mysqllogin";
 debugprint "MySQL Admin FINAL Client : $mysqladmincmd $mysqllogin";
@@ -6872,7 +6745,7 @@ mysql_views;                 # Show informations about views
 mysql_triggers;              # Show informations about triggers
 mysql_routines;              # Show informations about routines
 security_recommendations;    # Display some security recommendations
-cve_recommendations;         # Display related CVE
+#cve_recommendations;         # Display related CVE
 calculations;                # Calculate everything we need
 mysql_stats;                 # Print the server stats
 mysqsl_pfs;                  # Print Performance schema info
@@ -6886,7 +6759,7 @@ mariadb_xtradb;              # Print MariaDB XtraDB stats
 #mariadb_rockdb;           # Print MariaDB RockDB stats
 #mariadb_spider;           # Print MariaDB Spider stats
 #mariadb_connect;          # Print MariaDB Connect stats
-mariadb_galera;            # Print MariaDB Galera Cluster stats
+#mariadb_galera;            # Print MariaDB Galera Cluster stats
 get_replication_status;    # Print replication info
 make_recommendations;      # Make recommendations based on stats
 dump_result;               # Dump result if debug is on
@@ -6937,8 +6810,6 @@ You must provide the remote server's total memory when connecting to other serve
  --json                      Print result as JSON string
  --prettyjson                Print result as JSON formatted string
  --skippassword              Don't perform checks on user passwords (default: off)
- --checkversion              Check for updates to MySQLTuner (default: don't check)
- --updateversion             Check for updates to MySQLTuner and update when newer version is available (default: don't check)
  --forcemem <size>           Amount of RAM installed in megabytes
  --forceswap <size>          Amount of swap memory configured in megabytes
  --passwordfile <path>       Path to a password file list(one password by line)
